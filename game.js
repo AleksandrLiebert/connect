@@ -31,6 +31,7 @@ let gameSettings =
 	]
 }
 
+// Чтение настроек из localStorage
 function readSettings() {
 	let s = localStorage.getItem('connectSettings')
 	if (s == null) {
