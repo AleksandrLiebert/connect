@@ -236,6 +236,61 @@ function genConnector() {
 		connectorGenList.push(getPointDirection(x, y, realConnections[i]))
 }
 
+function straightenPCPaths() {
+	const clockwiseDirections = [RIGHT, DOWN, LEFT, UP]
+	const directionToNext = function(i, step) {
+		return step == 1 ? clockwiseDirections[i] : reverseDirection(clockwiseDirections[(i + 3) % 4])
+	}
+
+	for (let y = 0; y < fieldSize; y++) {
+		for (let x = 0; x < fieldSize; x++) {
+			const points = [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]]
+			const connectors = points.map(function(point) { return getConnector(point[0], point[1]) })
+
+			for (let junctionIndex = 0; junctionIndex < 4; junctionIndex++) {
+				for (const step of [1, -1]) {
+					const corner1Index = (junctionIndex + step + 4) % 4
+					const corner2Index = (junctionIndex + step * 2 + 8) % 4
+					const pcIndex = (junctionIndex + step * 3 + 12) % 4
+					const junction = connectors[junctionIndex]
+					const corner1 = connectors[corner1Index]
+					const corner2 = connectors[corner2Index]
+					const pc = connectors[pcIndex]
+					const junctionToCorner = directionToNext(junctionIndex, step)
+					const junctionToPC = directionToNext(junctionIndex, -step)
+					const corner1ToJunction = directionToNext(corner1Index, -step)
+					const corner1ToCorner2 = directionToNext(corner1Index, step)
+					const corner2ToCorner1 = directionToNext(corner2Index, -step)
+					const corner2ToPC = directionToNext(corner2Index, step)
+					const pcToCorner2 = directionToNext(pcIndex, -step)
+					const pcToJunction = directionToNext(pcIndex, step)
+					const contacts = [junction, corner1, corner2, pc].map(function(connector) {
+						return connector.getAttribute('connector')
+					})
+					const removesServer = [corner1Index, corner2Index, pcIndex].some(function(i) {
+						return correctXY(points[i][0]) == serverX && correctXY(points[i][1]) == serverY
+					})
+
+					if (!removesServer
+						&& getConnectionsCount(points[junctionIndex][0], points[junctionIndex][1]) == 3
+						&& getConnectionsCount(points[corner1Index][0], points[corner1Index][1]) == 2
+						&& getConnectionsCount(points[corner2Index][0], points[corner2Index][1]) == 2
+						&& getConnectionsCount(points[pcIndex][0], points[pcIndex][1]) == 1
+						&& contacts[0][junctionToCorner] == '1' && contacts[0][junctionToPC] == '0'
+						&& contacts[1][corner1ToJunction] == '1' && contacts[1][corner1ToCorner2] == '1'
+						&& contacts[2][corner2ToCorner1] == '1' && contacts[2][corner2ToPC] == '1'
+						&& contacts[3][pcToCorner2] == '1') {
+						junction.setAttribute('connector', contacts[0].replaceAt(junctionToCorner, '0').replaceAt(junctionToPC, '1'))
+						corner1.setAttribute('connector', '0000')
+						corner2.setAttribute('connector', '0000')
+						pc.setAttribute('connector', '0000'.replaceAt(pcToJunction, '1'))
+					}
+				}
+			}
+		}
+	}
+}
+
 
 function drawConnect() {
   allBlocks(drawBlock)
@@ -502,6 +557,7 @@ function createField() {
   	getConnector(serverX, serverY).innerHTML = '<div class="server"></div>'
 	connectorGenList = [[serverX, serverY]]
 	while (connectorGenList.length) genConnector()
+	straightenPCPaths()
 	initPC()
 	rotateField()
 	clearActive()
