@@ -2,24 +2,267 @@ const assert = require('node:assert')
 const fs = require('node:fs')
 const vm = require('node:vm')
 
-const game = fs.readFileSync('game.js', 'utf8').split('\nreadSettings()')[0]
+const block = fs.readFileSync('block.js', 'utf8').replaceAll('export ', '')
+const fieldClass = fs.readFileSync('field.js', 'utf8')
+	.replace("import { Block, DIRECTION_NAMES } from './block.js'", '')
+	.replaceAll('export ', '')
+const recordsClass = fs.readFileSync('records.js', 'utf8').replaceAll('export ', '')
+const game = block + fieldClass + recordsClass + fs.readFileSync('game.js', 'utf8')
+	.replace("import { Field } from './field.js'", '')
+	.replace("import { Records } from './records.js'", '')
+	.split('\nreadSettings()')[0]
+
+vm.runInNewContext(game + `
+	assert.strictEqual(String.prototype.replaceAt, undefined)
+	const block = new Block(null)
+	assert.strictEqual(block.contacts, '0000')
+	assert.strictEqual(block.active, false)
+	block.contacts = '1000'
+	assert.strictEqual(block.randomRotate(() => 2), 2)
+	assert.strictEqual(block.contacts, '0010')
+	const classes = new Set()
+	block.element = {
+		style: {},
+		children: [],
+		classList: {
+			add(value) { classes.add(value) },
+			remove(value) { classes.delete(value) }
+		}
+	}
+	block.draw()
+	assert.ok(block.element.style.backgroundImage.includes('%23d3d3d3'))
+`, {assert})
+
+vm.runInNewContext(game + `
+	const signals = []
+	let handoff
+	setTimeout = function(handler, delay) {
+		assert.strictEqual(delay, 240)
+		handoff = handler
+		return 1
+	}
+	clearTimeout = function() {}
+	const parent = {
+		appendChild(signal) {
+			signal.isConnected = true
+			signals.push(signal)
+		},
+		querySelectorAll() { return signals }
+	}
+	document = {
+		createElement() {
+			const values = {}
+			return {
+				values,
+				style: {
+					animationDelay: '',
+					setProperty(name, value) { values[name] = value }
+				},
+				remove() {
+					this.isConnected = false
+					signals.splice(signals.indexOf(this), 1)
+				},
+				addEventListener(name, handler) { this.onAnimationEnd = handler }
+			}
+		}
+	}
+	const block = new Block({parentElement: parent})
+	let ended = false
+	block.signal(3, 2, () => ended = true)
+	assert.strictEqual(signals.length, 1)
+	assert.ok(signals[0].innerHTML.includes('M 0 50 L 50 50 L 50 100'))
+	assert.ok(!ended)
+	handoff()
+	assert.ok(ended)
+	assert.strictEqual(signals.length, 1)
+	signals[0].onAnimationEnd()
+	assert.strictEqual(signals.length, 0)
+`, {assert})
+
+vm.runInNewContext(game + `
+	const block = new Block(null, 2, 3)
+	block.isPC = true
+	block.relateFieldAndDiv()
+	assert.strictEqual(document.requestedId, 'connector-2-3')
+	assert.strictEqual(block.element.innerHTML, '<div class="pc pc-off"></div>')
+`, {
+	assert,
+	document: {requestedId: null, getElementById(id) { this.requestedId = id; return {innerHTML: ''} }}
+})
+
+vm.runInNewContext(game + `
+	fieldSize = 3
+	field = new Field(fieldSize)
+	field.rand = () => 0
+	field.generateField()
+	assert.ok(field instanceof Field)
+	assert.strictEqual(field.blocks.length, fieldSize)
+	assert.strictEqual(field.blocks[0].length, fieldSize)
+	field.getBlock(field.serverX, field.serverY).fill()
+	for (const block of field.blocks.flat()) {
+		block.contacts = '0000'
+		block.active = false
+	}
+	const block = field.getBlock(0, 0)
+	assert.strictEqual(block.up, field.getBlock(0, 2))
+	assert.strictEqual(block.right, field.getBlock(1, 0))
+	assert.strictEqual(block.down, field.getBlock(0, 1))
+	assert.strictEqual(block.left, field.getBlock(2, 0))
+	block.contacts = '1000'
+	block.up.contacts = '0010'
+	assert.strictEqual(block.canConnect(UP), true)
+	block.fill()
+	assert.strictEqual(block.active, true)
+	assert.strictEqual(block.up.active, true)
+	assert.strictEqual(block.up.getConnectionsCount(), 1)
+	assert.strictEqual(block.getFreeNeighborsCount(), 3)
+	block.addConnection(RIGHT)
+	assert.strictEqual(block.contacts, '1100')
+`, {assert})
+
+vm.runInNewContext(game + `
+	const makeRand = () => {
+		let value = 1
+		return n => (value = value * 48271 % 2147483647) % n
+	}
+	const first = new Field(5)
+	const second = new Field(5)
+	first.rand = makeRand()
+	second.rand = makeRand()
+	first.generateField()
+	second.generateField()
+	assert.deepStrictEqual(
+		first.blocks.flat().map(block => block.contacts),
+		second.blocks.flat().map(block => block.contacts)
+	)
+`, {assert})
+
+vm.runInNewContext(game + `
+	const signalField = new Field(3)
+	signalField.generateField()
+	signalField.rand = () => 0
+	for (const block of signalField.blocks.flat()) {
+		block.contacts = '0000'
+		block.active = false
+		block.isPC = false
+	}
+	const server = signalField.getBlock(signalField.serverX, signalField.serverY)
+	const middle = server.right
+	const pc = middle.down
+	server.contacts = '0100'
+	middle.contacts = '0011'
+	pc.contacts = '1000'
+	server.active = middle.active = pc.active = true
+	pc.isPC = true
+	const moves = []
+	for (const block of signalField.blocks.flat()) {
+		block.signal = function(from, to, onEnd) {
+			moves.push([this.x, this.y, from, to])
+			if (onEnd) onEnd()
+		}
+	}
+	signalField.sendSignal()
+	assert.deepStrictEqual(moves, [
+		[server.x, server.y, null, RIGHT],
+		[middle.x, middle.y, LEFT, DOWN],
+		[pc.x, pc.y, UP, null]
+	])
+	moves.length = 0
+	server.signal = function(from, to, onEnd) {
+		moves.push([this.x, this.y, from, to])
+		middle.active = false
+		onEnd()
+	}
+	signalField.sendSignal()
+	assert.strictEqual(moves.length, 1)
+	middle.active = true
+	pc.active = false
+	server.signal = function(from, to, onEnd) {
+		moves.push([this.x, this.y, from, to])
+		onEnd()
+	}
+	moves.length = 0
+	signalField.sendSignal()
+	assert.deepStrictEqual(moves, [
+		[server.x, server.y, null, RIGHT],
+		[middle.x, middle.y, LEFT, DOWN]
+	])
+`, {assert})
+
+vm.runInNewContext(game + `
+	const elements = {}
+	document = {
+		getElementById(id) {
+			if (!elements[id]) {
+				const classes = new Set()
+				elements[id] = {
+					classList: {
+						add(value) { classes.add(value) },
+						remove(value) { classes.delete(value) },
+						contains(value) { return classes.has(value) }
+					}
+				}
+			}
+			return elements[id]
+		}
+	}
+	let hidden = false
+	let saved = false
+	const values = [[999, 999], [999, 999]]
+	const recordsView = new Records(values, () => hidden = true, () => saved = true)
+	recordsView.show()
+	assert.strictEqual(elements['end-time-5'].innerText, 999)
+	assert.strictEqual(elements['end-turns-7'].innerText, 999)
+	assert.ok(!elements.records.classList.contains('hide'))
+	assert.ok(recordsView.newRecord(12, 3, 5))
+	assert.deepStrictEqual(values, [[12, 3], [999, 999]])
+	assert.ok(saved)
+	assert.ok(!recordsView.newRecord(13, 3, 5))
+	recordsView.hide()
+	assert.ok(elements.records.classList.contains('hide'))
+	assert.ok(hidden)
+`, {assert})
+
+vm.runInNewContext(game + `
+	const makeClassList = () => ({add() {}, remove() {}})
+	const makeElement = () => {
+		const element = {style: {}, children: [], classList: makeClassList()}
+		Object.defineProperty(element, 'innerHTML', {
+			get() { return this.html || '' },
+			set(value) {
+				this.html = value
+				this.children = value ? [{classList: makeClassList()}] : []
+			}
+		})
+		return element
+	}
+	const elements = {field: makeElement()}
+	let usedSeed
+	Math.seedrandom = function(seed) { usedSeed = seed; return () => 0 }
+	document = {
+		getElementById(id) {
+			if (!elements[id]) elements[id] = makeElement()
+			return elements[id]
+		}
+	}
+	const testField = new Field(3)
+	const rotations = testField.createField('test-seed', function() {})
+	assert.strictEqual(usedSeed, 'test-seed')
+	assert.strictEqual(typeof rotations, 'number')
+	assert.ok(elements.field.innerHTML.includes('connector-0-0'))
+	assert.strictEqual(testField.getBlock(testField.serverX, testField.serverY).element.innerHTML, '<div class="server"></div>')
+	assert.ok(testField.allBlocks('getConnectionsCount').every(Number.isInteger))
+`, {assert})
 
 function test(points, expected, size = 5, server = [2, 2]) {
 	const setup = `
 		fieldSize = ${size}
 		serverX = ${server[0]}
 		serverY = ${server[1]}
-		field = Array.from({length: fieldSize}, () => Array(fieldSize))
-		for (let x = 0; x < fieldSize; x++) for (let y = 0; y < fieldSize; y++) {
-			field[x][y] = {
-				value: '0000',
-				getAttribute() { return this.value },
-				setAttribute(name, value) { this.value = value }
-			}
-		}
-		for (const [x, y, contacts] of ${JSON.stringify(points)}) getConnector(x, y).value = contacts
-		straightenPCPaths()
-		assert.deepStrictEqual(${JSON.stringify(expected)}.map(([x, y]) => getConnector(x, y).value), ${JSON.stringify(expected)}.map(point => point[2]))
+		field = new Field(fieldSize)
+		for (const [x, y, contacts] of ${JSON.stringify(points)}) field.getBlock(x, y).contacts = contacts
+		straightenPCPaths(field, serverX, serverY)
+		assert.deepStrictEqual(${JSON.stringify(expected)}.map(([x, y]) => field.getBlock(x, y).contacts), ${JSON.stringify(expected)}.map(point => point[2]))
 	`
 	vm.runInNewContext(game + setup, {assert})
 }
@@ -46,4 +289,74 @@ test(
 	[1, 0]
 )
 
-console.log('straightenPCPaths: ok')
+vm.runInNewContext(game + `
+	const makeClassList = () => {
+		const classes = new Set()
+		return {
+			add(value) { classes.add(value) },
+			remove(value) { classes.delete(value) },
+			contains(value) { return classes.has(value) }
+		}
+	}
+	const cell = new Block({children: [], classList: makeClassList()})
+	cell.contacts = '0100'
+	cell.originalContacts = '1000'
+	document.getElementById = () => ({classList: makeClassList()})
+	hintState = state => hintActive = state
+	drawTurns = () => {}
+	field = {refill() {}}
+	let endCalls = 0
+	endGame = () => endCalls++
+	hintActive = true
+	blockClick.call(cell, {button: 0})
+	assert.strictEqual(endCalls, 1)
+`, {assert, document: {}})
+
+vm.runInNewContext(game + `
+	rotateActive = true
+	turnsList = [['connector-0-0', 0]]
+	score = 3
+	cancelTurn()
+	assert.strictEqual(turnsList.length, 1)
+	assert.strictEqual(score, 3)
+`, {assert})
+
+vm.runInNewContext(game + `
+	field = new Field(2)
+	const html = field.allBlocks('getHTML', 2)
+	assert.strictEqual(html[0], '<div id="block-0-0" class="block"><div id="connector-0-0" class="connector"></div></div>')
+	assert.strictEqual(html[1], '<div id="block-1-0" class="block"><div id="connector-1-0" class="connector"></div></div><br />')
+	for (const block of field.blocks.flat()) {
+		block.active = true
+		block.element = {style: {}, children: []}
+	}
+	field.refill()
+	assert.strictEqual(field.getBlock(field.serverX, field.serverY).active, true)
+	assert.strictEqual(field.blocks.flat().filter(block => block.active).length, 1)
+`, {assert})
+
+vm.runInNewContext(game + `
+	let changedUrl = null
+	let usedTime = null
+	let usedEntropy = null
+	window.history = {replaceState(state, title, url) { changedUrl = url.toString() }}
+	Date.now = () => 123456
+	Math.seedrandom = function(time, options) {
+		usedTime = time
+		usedEntropy = options.entropy
+		return () => 0
+	}
+	createSeed()
+	assert.strictEqual(usedTime, 123456)
+	assert.strictEqual(usedEntropy, true)
+	assert.strictEqual(currentSeed, 'aaaaaaaaaaaaaaaa')
+	assert.strictEqual(changedUrl, 'https://example.com/game?size=9&seed=aaaaaaaaaaaaaaaa#board')
+`, {
+	assert,
+	URL,
+	window: {
+		location: {href: 'https://example.com/game?size=9#board'}
+	}
+})
+
+console.log('game tests: ok')

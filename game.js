@@ -1,11 +1,10 @@
-const UP = 0, RIGHT = 1, DOWN = 2, LEFT = 3
+import { Field } from './field.js'
+import { Records } from './records.js'
+
 let keyLIsDown = false
 let blockSize = 100
 let fieldSize = 9
-let serverX = 4
-let serverY = 4
 let score = 0
-let connectorGenList = []
 let panelHeight
 let panelWidth
 let turnsList = []
@@ -15,7 +14,8 @@ let time = 0
 let backTimeTick = 0
 let rotateActive = false
 let rotateConnector
-let field = []
+let field
+let records
 let currentSeed = ''
 let gameSettings =
 {
@@ -45,293 +45,17 @@ function saveSettings() {
 	localStorage.setItem('connectSettings', JSON.stringify(gameSettings))
 }
 
-String.prototype.replaceAt = function(index, replacement) {
-    return this.substring(0, index) + replacement + this.substring(index + replacement.length);
-}
-
-function rand(n) {
-	return Math.floor(Math.random() * n)
+function setQueryParameter(name, value) {
+	const url = new URL(window.location.href)
+	url.searchParams.set(name, value)
+	window.history.replaceState(null, '', url)
 }
 
 function createSeed() {
+	const random = new Math.seedrandom(Date.now(), {entropy: true})
 	currentSeed = ''
-	for (let i = 0; i < 16; i++) currentSeed += String.fromCharCode(97 + rand(26))
-	const searchParams = new URLSearchParams(window.location.search)
-	searchParams.set('seed', currentSeed)
-	window.location.search = searchParams.toString()
-}
-
-function reverseDirection(d) {
-	return (d + 2) % 4
-}
-
-function getPointDirection(x, y, d) {
-	switch (d) {
-		case UP: return [x, y - 1]
-		case DOWN: return [x, y + 1]
-		case RIGHT: return [x + 1, y]
-		case LEFT: return [x - 1, y]
-	}
-}
-
-function allBlocks(func) {
-	for (let y = 0; y < fieldSize; y++) {
-		for (let x = 0; x < fieldSize; x++) {
-			func(x, y)
-		}
-	}
-}
-
-function drawBlock(x, y) {
-	const connector = getConnector(x, y)
-	let contacts = connector.getAttribute('connector')
-	let active = connector.getAttribute('active')
-	let backStateContacts = connector.getAttribute('backStateContacts')
-	let backStateActive = connector.getAttribute('backStateActive')
-	if (contacts == backStateContacts && active == backStateActive) return
-	connector.setAttribute('backStateContacts', contacts)
-	connector.setAttribute('backStateActive', active)
-	let svg
-	if (contacts == '0000') {
-		connector.style.backgroundImage = ``
-	} else {
-		let color = active === '0' ? '%23d3d3d3' : '%2387cefa'
-		let up = contacts[UP] === '1' ? 'L 41 41 L 41 -5 L 59 -5 L 59 41' : ''
-		let right = contacts[RIGHT] === '1' ? 'L 59 41 L 105 41 L 105 59 L 59 59' : ''
-		let down = contacts[DOWN] === '1' ? 'L 59 59 L 59 105 L 41 105 L 41 59' : ''
-		let left = contacts[LEFT] === '1' ? 'L 41 59 L -5 59 L -5 41 L 41 41' : ''
-		connector.style.backgroundImage = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100px' height='100px'%3E %3Cpath fill='${color}' d='M 41 41 ${up} L 59 41 ${right} L 59 59 ${down} L 41 59 ${left} Z' /%3E %3C/svg%3E")`
-	}
-	if (connector.children.length == 1 && connector.children[0].classList.contains('pc')) {
-		if (active == '0') {
-			connector.children[0].classList.add('pc-off')
-			connector.children[0].classList.remove('pc-on')
-		} else {
-			connector.children[0].classList.add('pc-on')
-			connector.children[0].classList.remove('pc-off')
-		}
-	}
-}
-
-function addBlock(x, y) {
-    const tField = document.getElementById('field')
-    let active = '0'
-    let connector = '0000'
-    tField.innerHTML += '<div id="block-' + x + '-' + y + '" class="block"><div id="connector-' + x + '-' + y + '" class="connector" connector="' + connector + '" active="' + active + '" backC="-1" backA="-1"></div></div>'
-    field[x][y] = document.getElementById('connector-' + x + '-' + y)
-    if (x == fieldSize - 1) {
-      tField.innerHTML += '<br />'
-    }
-}
-
-function correctXY(n) {
-  if (n >= 0) {
-    return n % fieldSize
-  } else {
-		let x = n % fieldSize
-		if (x == 0) {
-			return 0
-		} else {
-			return fieldSize + x
-		}
-  }
-}
-
-function getConnector(x, y, c = null) {
-	switch (c) {
-		case UP:
-			y--
-			break
-		case DOWN:
-			y++
-			break
-		case RIGHT:
-			x++
-			break
-		case LEFT:
-			x--
-			break
-		default:
-			break
-	}
-	let rx = correctXY(x)
-	let ry = correctXY(y)
-	return field[rx][ry]
-}
-
-function checkDirection(x, y, d) {
-	let connector = getConnector(x, y)
-	let connectorNext = getConnector(x, y, d)
-	let contacts = connector.getAttribute('connector')
-	let contactsNext = connectorNext.getAttribute('connector')
-	let active = connectorNext.getAttribute('active')
-	let rotate = connector.getAttribute('rotate')
-	let rotateNext = connectorNext.getAttribute('rotate')
-	return contacts[d] == '1' && contactsNext[reverseDirection(d)] == '1' && active == '0' && rotate == '0' && rotateNext == '0'
-}
-
-function setConnect(x, y, c) {
-	const connector = getConnector(x, y)
-	const contacts = connector.getAttribute('connector')
-	connector.setAttribute('connector', contacts.replaceAt(c, '1'))
-}
-
-function getConnectionsCount(x, y, d) {
-	let connector = getConnector(x, y, d)
-	if (connector.getAttribute('connector') == null) return 0
-	const contacts = connector.getAttribute('connector')
-	let sum = 0
-	for (let i = 0; i < contacts.length; i++) sum += parseInt(contacts[i])
-	return sum
-}
-
-function getFreeBlock(x, y) {
-	let free = 4
-	for (let d = 0; d < 4; d++) {
-		if (getConnectionsCount(x, y, d) != 0) {
-			free--
-		}
-	}
-	return free
-}
-
-function genConnector() {
-	let nxy = rand(connectorGenList.length)
-	let xy = connectorGenList[nxy]
-	connectorGenList.splice(nxy, 1)
-	const x = xy[0]
-	const y = xy[1]
-	let allowBlocks = getFreeBlock(x, y)
-	if (allowBlocks == 4) {
-		allowBlocks = 3
-	} else if (allowBlocks == 3) {
-		allowBlocks = 2
-	} else if (allowBlocks == 0) {
-		return
-	}
-	allowBlocks = rand(allowBlocks) + 1
-	let realConnections = []
-	let allowConnections = [UP, DOWN, RIGHT, LEFT]
-	for (let d = 0; d < 4; d++) {
-		if (getConnectionsCount(x, y, d)) {
-			allowConnections = allowConnections.filter(function(value, index, arr) {
-				return value != d
-			})
-		}
-	}
-
-  	while (allowBlocks != 0) {
-		let ch = allowConnections[rand(allowConnections.length)]
-		realConnections.push(ch)
-		allowConnections = allowConnections.filter(function(value, index, arr) {
-			return value != ch
-		})
-		allowBlocks--
-		setConnect(x, y, ch)
-		let point = getPointDirection(x, y, ch)
-		setConnect(point[0], point[1], reverseDirection(ch))
-  	}
-
-	for (let i = 0; i < realConnections.length; i++)
-		connectorGenList.push(getPointDirection(x, y, realConnections[i]))
-}
-
-function straightenPCPaths() {
-	const clockwiseDirections = [RIGHT, DOWN, LEFT, UP]
-	const directionToNext = function(i, step) {
-		return step == 1 ? clockwiseDirections[i] : reverseDirection(clockwiseDirections[(i + 3) % 4])
-	}
-
-	for (let y = 0; y < fieldSize; y++) {
-		for (let x = 0; x < fieldSize; x++) {
-			const points = [[x, y], [x + 1, y], [x + 1, y + 1], [x, y + 1]]
-			const connectors = points.map(function(point) { return getConnector(point[0], point[1]) })
-
-			for (let junctionIndex = 0; junctionIndex < 4; junctionIndex++) {
-				for (const step of [1, -1]) {
-					const corner1Index = (junctionIndex + step + 4) % 4
-					const corner2Index = (junctionIndex + step * 2 + 8) % 4
-					const pcIndex = (junctionIndex + step * 3 + 12) % 4
-					const junction = connectors[junctionIndex]
-					const corner1 = connectors[corner1Index]
-					const corner2 = connectors[corner2Index]
-					const pc = connectors[pcIndex]
-					const junctionToCorner = directionToNext(junctionIndex, step)
-					const junctionToPC = directionToNext(junctionIndex, -step)
-					const corner1ToJunction = directionToNext(corner1Index, -step)
-					const corner1ToCorner2 = directionToNext(corner1Index, step)
-					const corner2ToCorner1 = directionToNext(corner2Index, -step)
-					const corner2ToPC = directionToNext(corner2Index, step)
-					const pcToCorner2 = directionToNext(pcIndex, -step)
-					const pcToJunction = directionToNext(pcIndex, step)
-					const contacts = [junction, corner1, corner2, pc].map(function(connector) {
-						return connector.getAttribute('connector')
-					})
-					const removesServer = [corner1Index, corner2Index, pcIndex].some(function(i) {
-						return correctXY(points[i][0]) == serverX && correctXY(points[i][1]) == serverY
-					})
-
-					if (!removesServer
-						&& getConnectionsCount(points[junctionIndex][0], points[junctionIndex][1]) == 3
-						&& getConnectionsCount(points[corner1Index][0], points[corner1Index][1]) == 2
-						&& getConnectionsCount(points[corner2Index][0], points[corner2Index][1]) == 2
-						&& getConnectionsCount(points[pcIndex][0], points[pcIndex][1]) == 1
-						&& contacts[0][junctionToCorner] == '1' && contacts[0][junctionToPC] == '0'
-						&& contacts[1][corner1ToJunction] == '1' && contacts[1][corner1ToCorner2] == '1'
-						&& contacts[2][corner2ToCorner1] == '1' && contacts[2][corner2ToPC] == '1'
-						&& contacts[3][pcToCorner2] == '1') {
-						junction.setAttribute('connector', contacts[0].replaceAt(junctionToCorner, '0').replaceAt(junctionToPC, '1'))
-						corner1.setAttribute('connector', '0000')
-						corner2.setAttribute('connector', '0000')
-						pc.setAttribute('connector', '0000'.replaceAt(pcToJunction, '1'))
-					}
-				}
-			}
-		}
-	}
-}
-
-
-function drawConnect() {
-  allBlocks(drawBlock)
-}
-
-function setPC(x, y) {
-	if (x == serverX && y == serverY) return
-	if (getConnectionsCount(x, y) == 1)
-		getConnector(x, y).innerHTML = '<div class="pc pc-off"></div>'
-}
-
-function clearActive() {
-	allBlocks(function(x, y) {
-		getConnector(x, y).setAttribute('active', '0')
-	})
-}
-
-function initPC() {
-	allBlocks(setPC)
-}
-
-function fillField(x, y) {
-	getConnector(x, y).setAttribute('active', '1')
-	for (let d = 0; d < 4; d++) {
-		if (checkDirection(x, y, d)) {
-			let point = getPointDirection(x, y, d)
-			fillField(point[0], point[1])
-		}
-	}
-}
-
-function rotateLeftConnector(connector) {
-	let contacts = connector.getAttribute('connector')
-	contacts = contacts.substr(1, 3) + contacts.substr(0, 1)
-	connector.setAttribute('connector', contacts)
-}
-
-function rotateRightConnector(connector) {
-	let contacts = connector.getAttribute('connector')
-	contacts = contacts.substr(3, 1) + contacts.substr(0, 3)
-	connector.setAttribute('connector', contacts)
+	for (let i = 0; i < 16; i++) currentSeed += String.fromCharCode(97 + Math.floor(random() * 26))
+	setQueryParameter('seed', currentSeed)
 }
 
 function changeColorCursor(color) {
@@ -340,21 +64,20 @@ function changeColorCursor(color) {
 }
 
 function endAnimation() {
-	rotateConnector.setAttribute('rotate', '0')
-	if (rotateConnector.classList.contains('contacts-rotate-left')) {
-		rotateLeftConnector(rotateConnector)
+	const connector = rotateConnector.element
+	rotateConnector.rotating = false
+	if (connector.classList.contains('contacts-rotate-left')) {
+		rotateConnector.rotateLeftConnector()
 	} else {
-		rotateRightConnector(rotateConnector)
+		rotateConnector.rotateRightConnector()
 	}
-	rotateConnector.classList.remove('contacts-rotate-left')
-	rotateConnector.classList.remove('contacts-rotate-right')
-	if (rotateConnector.children.length == 1) {
-		rotateConnector.children[0].classList.remove('device-rotate-left')
-		rotateConnector.children[0].classList.remove('device-rotate-right')
+	connector.classList.remove('contacts-rotate-left')
+	connector.classList.remove('contacts-rotate-right')
+	if (connector.children.length == 1) {
+		connector.children[0].classList.remove('device-rotate-left')
+		connector.children[0].classList.remove('device-rotate-right')
 	}
-	clearActive()
-	fillField(serverX, serverY)
-	drawConnect()
+	field.refill()
 	rotateActive = false
 	endGame()
 }
@@ -363,210 +86,131 @@ function blockClick(handle) {
 	if (rotateActive) {
 		return
 	}
-	let lastTurn = ['none', 'none']
+	const connector = this.element
+	let lastTurn = [null, null]
 	if (turnsList.length > 0) {
 		lastTurn = turnsList[turnsList.length - 1]
 	}
 	if (handle.button == 1 || keyLIsDown && handle.button == 0) {
-		if (lastTurn[0] == this.id && lastTurn[1] == 1) {
+		if (lastTurn[0] == this && lastTurn[1] == 1) {
 			turnsList.pop()
 		} else {
-			turnsList.push([this.id, 1])
+			turnsList.push([this, 1])
 		}
-		if (this.classList.contains('block-lock')) {
-			this.classList.remove('block-lock')
-		} else {
-			this.classList.add('block-lock')
-		}
-	} else if (handle.button == 0 && !this.classList.contains('block-lock') && !this.classList.contains('block-hint-lock') && this.getAttribute('connector') != '0000') {
+		this.locked = !this.locked
+		connector.classList.toggle('block-lock', this.locked)
+	} else if (handle.button == 0 && !this.locked && !this.hintLocked && this.contacts != '0000') {
 		if (hintActive) {
 			hintState(false)
-			let original = this.getAttribute('original-connector')
+			let original = this.originalContacts
 			let ds = 0
-			while (original != this.getAttribute('connector')) {
-				rotateLeftConnector(this)
+			while (original != this.contacts) {
+				this.rotateLeftConnector()
 				ds++
 			}
 			if (ds == 3) {
 				ds = 1
 			}
 			score += ds
-			this.classList.add('block-hint-lock')
+			this.hintLocked = true
+			connector.classList.add('block-hint-lock')
 			let hintButton = document.getElementById('get-hint')
 			hintButton.classList.remove('fa-active')
 			hintButton.classList.add('fa-disable')
 		} else {
-			if (lastTurn[0] == this.id && lastTurn[1] == 2) {
+			if (lastTurn[0] == this && lastTurn[1] == 2) {
 				score--
 				turnsList.pop()
 			} else {
 				score++
-				turnsList.push([this.id, 0])
+				turnsList.push([this, 0])
 			}
 			rotateActive = true
-			this.setAttribute('rotate', '1')
-			this.classList.add('contacts-rotate-left')
-			if (this.children.length == 1) {
-				this.children[0].classList.add('device-rotate-left')
+			this.rotating = true
+			connector.classList.add('contacts-rotate-left')
+			if (connector.children.length == 1) {
+				connector.children[0].classList.add('device-rotate-left')
 			}
 			rotateConnector = this
 			setTimeout(endAnimation, 150)
 		}
-		clearActive()
-		fillField(serverX, serverY)
-		drawConnect()
+		field.refill()
 		drawTurns()
-	} else if (handle.button == 2 && !this.classList.contains('block-lock') && !this.classList.contains('block-hint-lock') && this.getAttribute('connector') != '0000') {
+		if (this.hintLocked) endGame()
+	} else if (handle.button == 2 && !this.locked && !this.hintLocked && this.contacts != '0000') {
 		if (hintActive) {
 			return
 		}
-		if (lastTurn[0] == this.id && lastTurn[1] == 0) {
+		if (lastTurn[0] == this && lastTurn[1] == 0) {
 			score--
 			turnsList.pop()
 		} else {
 			score++
-			turnsList.push([this.id, 2])
+			turnsList.push([this, 2])
 		}
 		rotateActive = true
-		this.setAttribute('rotate', '1')
-		this.classList.add('contacts-rotate-right')
-		if (this.children.length == 1) {
-			this.children[0].classList.add('device-rotate-right')
+		this.rotating = true
+		connector.classList.add('contacts-rotate-right')
+		if (connector.children.length == 1) {
+			connector.children[0].classList.add('device-rotate-right')
 		}
 		rotateConnector = this
 		setTimeout(endAnimation, 150)
-		clearActive()
-		fillField(serverX, serverY)
-		drawConnect()
+		field.refill()
 		drawTurns()
 	}
 }
 
 function cancelTurn() {
+	if (rotateActive) return
 	if (turnsList.length > 0) {
 		let turn = turnsList.pop()
-		let connector = document.getElementById(turn[0])
-		if (connector.classList.contains('block-hint-lock')) {
+		let cell = turn[0]
+		let connector = cell.element
+		if (cell.hintLocked) {
 			cancelTurn()
 			return
 		}
 		if (turn[1] == 0) {
 			score--
 			rotateActive = true
-			connector.setAttribute('rotate', '1')
+			cell.rotating = true
 			connector.classList.add('contacts-rotate-right')
 			if (connector.children.length == 1) {
 				connector.children[0].classList.add('device-rotate-right')
 			}
-			rotateConnector = connector
+			rotateConnector = cell
 			setTimeout(endAnimation, 150)
-			clearActive()
-			fillField(serverX, serverY)
-			drawConnect()
+			field.refill()
 			drawTurns()
 		} else if (turn[1] == 2) {
 			score--
 			rotateActive = true
-			connector.setAttribute('rotate', '1')
+			cell.rotating = true
 			connector.classList.add('contacts-rotate-left')
 			if (connector.children.length == 1) {
 				connector.children[0].classList.add('device-rotate-left')
 			}
-			rotateConnector = connector
+			rotateConnector = cell
 			setTimeout(endAnimation, 150)
-			clearActive()
-			fillField(serverX, serverY)
-			drawConnect()
+			field.refill()
 			drawTurns()
 		} else if (turn[1] == 1) {
-			if (connector.classList.contains('block-lock')) {
-				connector.classList.remove('block-lock')
-			} else {
-				connector.classList.add('block-lock')
-			}
+			cell.locked = !cell.locked
+			connector.classList.toggle('block-lock', cell.locked)
 		}
 	}
 }
 
-function rotateLeft(x, y) {
-	let connector = getConnector(x, y)
-	rotateLeftConnector(connector)
-}
-
-function rotateRight(x, y) {
-	let connector = getConnector(x, y)
-	rotateRightConnector(connector)
-}
-
-function randomRotate(x, y) {
-	let connector = getConnector(x, y)
-	let contacts = connector.getAttribute('connector')
-	if (contacts == '0000') return
-	connector.setAttribute('original-connector', contacts)
-	connector.setAttribute('rotate', '0')
-	if (contacts == '0101' || contacts == '1010') {
-		if (rand(2) == 0) {
-			rotateRightConnector(connector)
-			score--
-		}
-	} else {
-		switch (rand(4)) {
-			case 0:
-				break
-			case 1:
-				rotateRightConnector(connector)
-				score--
-				break
-			case 2:
-				rotateRightConnector(connector)
-				rotateRightConnector(connector)
-				score -= 2
-				break
-			case 3:
-				rotateLeftConnector(connector)
-				score--
-				break
-			default:
-				break
-		}
-	}
-}
-
-function rotateField() {
-	score = 0
-	allBlocks(randomRotate)
-}
-
-function relateFieldAndDiv(x, y) {
-	field[x][y] = document.getElementById(`connector-${x}-${y}`)
-}
-
-function createField() {
+function createGameState() {
 	turnsList = []
-	serverX = parseInt(fieldSize / 2 - 0.5)
-	serverY = serverX
-	field = []
-	for (let i = 0; i < fieldSize; i++) {
-		let layer = []
-		for (let j = 0; j < fieldSize; j++) layer.push(null)
-		field.push(layer)
+	if (currentSeed === null) {
+		createSeed()
 	}
-	document.getElementById('field').innerHTML = ''
-	allBlocks(addBlock)
-	allBlocks(relateFieldAndDiv)
-  	getConnector(serverX, serverY).innerHTML = '<div class="server"></div>'
-	connectorGenList = [[serverX, serverY]]
-	while (connectorGenList.length) genConnector()
-	straightenPCPaths()
-	initPC()
-	rotateField()
-	clearActive()
-	fillField(serverX, serverY)
-	allBlocks(function(x, y) {
-		let connector = getConnector(x, y)
-		connector.onmousedown = blockClick
-	})
-  	drawConnect()
+	if (field) field.stopSignals()
+	field = new Field(fieldSize)
+	score = -field.createField(currentSeed, blockClick)
+	field.startSignals()
 	backTimeTick = Date.now()
 	time = 0
 }
@@ -604,22 +248,15 @@ function initHint() {
 }
 
 function startGame() {
-	if (currentSeed === null) {
-		createSeed()
-	}
-	Math.seedrandom(currentSeed)
 	initHint()
-	createField()
-	resizeField()
+	createGameState()
 	drawTurns()
+	resizeField()
 }
 
 function drawTurns() {
 	const turns = document.getElementById('turns')
 	turns.innerText = score
-	turns.style.fontSize = parseInt(panelHeight / 3) + 'px'
-	turns.style.bottom = parseInt((panelHeight - turns.offsetHeight) / 2)
-	turns.style.left = panelHeight + 10 + parseInt((panelHeight - 20 - turns.offsetWidth) / 2)
 	if (score <= 0) {
 		turns.style.color = '#6c6'
 	} else {
@@ -727,13 +364,13 @@ function hideSelectMode() {
 	drawTurns()
 }
 
-function start(size) {
+function selectGameMode(size) {
 	fieldSize = size
 	gameSettings.mode = fieldSize
 	saveSettings()
-	const searchParams = new URLSearchParams(window.location.search)
-	searchParams.set('size', fieldSize)
-	window.location.search = searchParams.toString()
+	setQueryParameter('size', fieldSize)
+	hideSelectMode()
+	startGame()
 }
 
 function pauseHandler() {
@@ -759,23 +396,12 @@ function pauseHandler() {
 	}
 }
 
-function newRecord(time, score) {
-	const level = parseInt((fieldSize - 4) / 2 - 0.5)
-	if (gameSettings.records[level][1] > score
-		|| gameSettings.records[level][1] == score && gameSettings.records[level][0] > time) {
-		gameSettings.records[level] = [time, score]
-		saveSettings()
-		return true
-	}
-	return false
-}
-
 function endGame() {
-	if (document.getElementsByClassName('pc-off').length) return
+	if (field.allBlocks('isInactivePC').some(Boolean)) return
 	let endTime = parseInt(time / 1000)
 	if (endTime > 999) endTime = 999
 	if (score < 0) score = 0
-	const isNewRecord = newRecord(endTime, score)
+	const isNewRecord = records.newRecord(endTime, score, fieldSize)
 	document.getElementById('panels').classList.add('hide')
 	document.getElementById('game').classList.add('blur')
 	changeColorCursor('rgba(0, 0, 0, 0)')
@@ -791,32 +417,6 @@ function afterEndGame() {
 	document.getElementById('game-over').classList.add('hide')
 	createSeed()
 	startGame()
-}
-
-function hideRecords() {
-	document.getElementById('panels').classList.remove('hide')
-	document.getElementById('game').classList.remove('blur')
-	document.getElementById('records').classList.add('hide')
-	drawTime()
-	drawTurns()
-}
-
-function showRecords() {
-	document.getElementById('panels').classList.add('hide')
-	document.getElementById('game').classList.add('blur')
-	document.getElementById('records').classList.remove('hide')
-	document.getElementById('end-time-5').innerText = gameSettings.records[0][0]
-	document.getElementById('end-turns-5').innerText = gameSettings.records[0][1]
-	document.getElementById('end-time-7').innerText = gameSettings.records[1][0]
-	document.getElementById('end-turns-7').innerText = gameSettings.records[1][1]
-	document.getElementById('end-time-9').innerText = gameSettings.records[2][0]
-	document.getElementById('end-turns-9').innerText = gameSettings.records[2][1]
-	document.getElementById('end-time-11').innerText = gameSettings.records[3][0]
-	document.getElementById('end-turns-11').innerText = gameSettings.records[3][1]
-	document.getElementById('end-time-13').innerText = gameSettings.records[4][0]
-	document.getElementById('end-turns-13').innerText = gameSettings.records[4][1]
-	document.getElementById('end-time-15').innerText = gameSettings.records[5][0]
-	document.getElementById('end-turns-15').innerText = gameSettings.records[5][1]
 }
 
 function timeTick() {
@@ -842,19 +442,19 @@ function setEvents() {
 		startGame()
 	}
 	document.getElementById('game-over').onclick = afterEndGame
-	document.getElementById('show-records').onclick = showRecords
-	document.getElementById('records').onclick = hideRecords
+	document.getElementById('show-records').onclick = records.show.bind(records)
+	document.getElementById('records').onclick = records.hide.bind(records)
 	window.onresize = resizeField
 	document.getElementById('change-mode').onclick = showSelectMode
 	document.getElementsByClassName('close-select-mode')[0].onclick = hideSelectMode
 	let modes = document.getElementsByClassName('mode')
 	for (let i = 0; i < modes.length; i++)
-		modes[i].onclick = function() {start(parseInt(this.getAttribute('value')))}
+		modes[i].onclick = function() {selectGameMode(parseInt(this.getAttribute('value')))}
 	document.getElementById('cancel-turn').onclick = cancelTurn
 	document.getElementById('get-hint').onclick = getHint
 	document.getElementById('pause').onclick = pauseHandler
 	setInterval(timeTick, 100)
-	window.onload = drawTurns
+	document.fonts.ready.then(resizeField)
 	document.onkeydown = function(e) {
 		if (e.code == 'KeyZ' && e.ctrlKey) cancelTurn()
 		if (e.code == 'KeyL') keyLIsDown = true
@@ -869,12 +469,15 @@ function getSizeFromUrl() {
 	const size = new URLSearchParams(window.location.search).get('size')
 	if (size !== null)
 		return parseInt(size)
-	const searchParams = new URLSearchParams(window.location.search)
-	searchParams.set('size', gameSettings.mode)
-	window.location.search = searchParams.toString()
+	setQueryParameter('size', gameSettings.mode)
+	return gameSettings.mode
 }
 
 readSettings()
+records = new Records(gameSettings.records, function() {
+	drawTime()
+	drawTurns()
+}, saveSettings)
 setEvents()
 //get seed from url
 currentSeed = new URLSearchParams(window.location.search).get('seed')
