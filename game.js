@@ -208,10 +208,8 @@ function createGameState() {
 	if (currentSeed === null) {
 		createSeed()
 	}
-	if (field) field.stopSignals()
 	field = new Field(fieldSize)
 	score = -field.createField(currentSeed, blockClick)
-	field.startSignals()
 	backTimeTick = Date.now()
 	time = 0
 }

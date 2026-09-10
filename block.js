@@ -1,5 +1,4 @@
 export const DIRECTION_NAMES = ['up', 'right', 'down', 'left']
-const SIGNAL_POINTS = [[50, 0], [100, 50], [50, 100], [0, 50]]
 
 export class Block {
 	constructor(element, x, y) {
@@ -105,32 +104,6 @@ export class Block {
 
 	isInactivePC() {
 		return this.isPC && !this.active
-	}
-
-	clearSignal() {
-		if (!this.element || !this.element.parentElement) return
-		for (const signal of this.element.parentElement.querySelectorAll('.signal-beam')) signal.remove()
-	}
-
-	signal(fromDirection, toDirection, onEnd) {
-		const from = fromDirection === null ? [50, 50] : SIGNAL_POINTS[fromDirection]
-		const to = toDirection === null ? [50, 50] : SIGNAL_POINTS[toDirection]
-		const signal = document.createElement('div')
-		signal.className = 'signal-beam'
-		signal.innerHTML = `<svg viewBox="0 0 100 100"><path pathLength="100" d="M ${from.join(' ')} L 50 50 L ${to.join(' ')}" /></svg>`
-		let continued = false
-		const continueSignal = () => {
-			if (continued || !onEnd || !signal.isConnected) return
-			continued = true
-			onEnd()
-		}
-		this.element.parentElement.appendChild(signal)
-		const handoffTimer = onEnd ? setTimeout(continueSignal, 240) : null
-		signal.addEventListener('animationend', () => {
-			continueSignal()
-			if (handoffTimer !== null) clearTimeout(handoffTimer)
-			signal.remove()
-		}, {once: true})
 	}
 
 	draw() {

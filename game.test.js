@@ -34,52 +34,6 @@ vm.runInNewContext(game + `
 `, {assert})
 
 vm.runInNewContext(game + `
-	const signals = []
-	let handoff
-	setTimeout = function(handler, delay) {
-		assert.strictEqual(delay, 240)
-		handoff = handler
-		return 1
-	}
-	clearTimeout = function() {}
-	const parent = {
-		appendChild(signal) {
-			signal.isConnected = true
-			signals.push(signal)
-		},
-		querySelectorAll() { return signals }
-	}
-	document = {
-		createElement() {
-			const values = {}
-			return {
-				values,
-				style: {
-					animationDelay: '',
-					setProperty(name, value) { values[name] = value }
-				},
-				remove() {
-					this.isConnected = false
-					signals.splice(signals.indexOf(this), 1)
-				},
-				addEventListener(name, handler) { this.onAnimationEnd = handler }
-			}
-		}
-	}
-	const block = new Block({parentElement: parent})
-	let ended = false
-	block.signal(3, 2, () => ended = true)
-	assert.strictEqual(signals.length, 1)
-	assert.ok(signals[0].innerHTML.includes('M 0 50 L 50 50 L 50 100'))
-	assert.ok(!ended)
-	handoff()
-	assert.ok(ended)
-	assert.strictEqual(signals.length, 1)
-	signals[0].onAnimationEnd()
-	assert.strictEqual(signals.length, 0)
-`, {assert})
-
-vm.runInNewContext(game + `
 	const block = new Block(null, 2, 3)
 	block.isPC = true
 	block.relateFieldAndDiv()
@@ -135,58 +89,6 @@ vm.runInNewContext(game + `
 		first.blocks.flat().map(block => block.contacts),
 		second.blocks.flat().map(block => block.contacts)
 	)
-`, {assert})
-
-vm.runInNewContext(game + `
-	const signalField = new Field(3)
-	signalField.generateField()
-	signalField.rand = () => 0
-	for (const block of signalField.blocks.flat()) {
-		block.contacts = '0000'
-		block.active = false
-		block.isPC = false
-	}
-	const server = signalField.getBlock(signalField.serverX, signalField.serverY)
-	const middle = server.right
-	const pc = middle.down
-	server.contacts = '0100'
-	middle.contacts = '0011'
-	pc.contacts = '1000'
-	server.active = middle.active = pc.active = true
-	pc.isPC = true
-	const moves = []
-	for (const block of signalField.blocks.flat()) {
-		block.signal = function(from, to, onEnd) {
-			moves.push([this.x, this.y, from, to])
-			if (onEnd) onEnd()
-		}
-	}
-	signalField.sendSignal()
-	assert.deepStrictEqual(moves, [
-		[server.x, server.y, null, RIGHT],
-		[middle.x, middle.y, LEFT, DOWN],
-		[pc.x, pc.y, UP, null]
-	])
-	moves.length = 0
-	server.signal = function(from, to, onEnd) {
-		moves.push([this.x, this.y, from, to])
-		middle.active = false
-		onEnd()
-	}
-	signalField.sendSignal()
-	assert.strictEqual(moves.length, 1)
-	middle.active = true
-	pc.active = false
-	server.signal = function(from, to, onEnd) {
-		moves.push([this.x, this.y, from, to])
-		onEnd()
-	}
-	moves.length = 0
-	signalField.sendSignal()
-	assert.deepStrictEqual(moves, [
-		[server.x, server.y, null, RIGHT],
-		[middle.x, middle.y, LEFT, DOWN]
-	])
 `, {assert})
 
 vm.runInNewContext(game + `

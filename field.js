@@ -112,7 +112,6 @@ export class Field {
 		this.serverX = parseInt(size / 2 - 0.5)
 		this.serverY = this.serverX
 		this.random = Math.random
-		this.signalTimer = null
 	}
 
 	getBlock(x, y) {
@@ -131,7 +130,6 @@ export class Field {
 	}
 
 	refill() {
-		this.allBlocks('clearSignal')
 		this.allBlocks('clearActive')
 		this.getBlock(this.serverX, this.serverY).fill()
 		this.allBlocks('draw')
@@ -139,49 +137,6 @@ export class Field {
 
 	rand(n) {
 		return Math.floor(this.random() * n)
-	}
-
-	sendSignal() {
-		const visited = new Set()
-		const travel = (block, from = null) => {
-			if (!block.active || visited.has(block)) return
-			visited.add(block)
-			if (block.isPC) {
-				block.signal(from, null)
-				return
-			}
-			const directions = DIRECTION_NAMES.map((name, direction) => direction).filter(direction => {
-				const neighbor = block[DIRECTION_NAMES[direction]]
-				return block.contacts[direction] == '1'
-					&& direction != from
-					&& !(neighbor.active
-						&& neighbor.contacts[(direction + 2) % 4] == '1'
-						&& visited.has(neighbor))
-			})
-			if (!directions.length) return
-			const to = directions[this.rand(directions.length)]
-			const next = block[DIRECTION_NAMES[to]]
-			block.signal(from, to, () => {
-				if (block.active && next.active && !visited.has(next)
-					&& block.contacts[to] == '1'
-					&& next.contacts[(to + 2) % 4] == '1') {
-					travel(next, (to + 2) % 4)
-				}
-			})
-		}
-		travel(this.getBlock(this.serverX, this.serverY))
-	}
-
-	startSignals() {
-		this.stopSignals()
-		this.sendSignal()
-		this.signalTimer = setInterval(() => this.sendSignal(), 10000)
-	}
-
-	stopSignals() {
-		if (this.signalTimer !== null) clearInterval(this.signalTimer)
-		this.signalTimer = null
-		this.allBlocks('clearSignal')
 	}
 
 	generateField() {
