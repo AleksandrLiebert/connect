@@ -2,6 +2,11 @@
   --cursor-color: rgba(255, 255, 255, 0.3);
 }
 
+* {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 @font-face {
     font-family: AppFont;
     src: url("../fonts/17607.otf") format("opentype");
@@ -9,7 +14,6 @@
 
 body {
   background: radial-gradient(#305dd1, #19316d);
-  user-select: none;
   overflow-x: hidden;
   overflow-y: hidden;
   padding: 0;
